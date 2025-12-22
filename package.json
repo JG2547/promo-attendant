@@ -1,0 +1,23 @@
+{
+  "name": "@botify/promo-attendant",
+  "version": "1.0.0",
+  "description": "Promo Attendant bot - standalone service for room activity embeds",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "node-telegram-bot-api": "^0.66.0",
+    "pg": "^8.11.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "promo-attendant",
+    "botify-network"
+  ]
+}
