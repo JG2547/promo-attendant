@@ -1342,28 +1342,37 @@ function buildMessage(rooms, telegramGroups = []) {
 /**
  * Build main keyboard
  */
-function mainKeyboard(settings = null) {
+function mainKeyboard(settings = null, userId = null) {
   const isDMSubscriber = settings && settings.chat_type === 'private' && settings.enabled;
+  const isAdmin = userId && isSuperAdmin(userId);
   const botUsername = process.env.PROMO_ATTENDANT_BOT_USERNAME || 'PromoAttendantBot';
 
-  return {
-    inline_keyboard: [
-      [
-        { text: '+ GROUP', url: `https://t.me/${botUsername}?startgroup=rooms` },
-        { text: 'MORE INFO', callback_data: 'pa:more_info' }
-      ],
-      [
-        { text: '+ CHANNEL', url: `https://t.me/${botUsername}?startchannel=rooms` },
-        { text: 'Refresh', callback_data: 'pa:refresh' }
-      ],
-      [
-        isDMSubscriber
-          ? { text: 'View List', callback_data: 'pa:view_list' }
-          : { text: '+ Direct Message', callback_data: 'pa:enable_dm' },
-        { text: 'Settings', callback_data: 'pa:settings' }
-      ]
+  const keyboard = [
+    [
+      { text: '+ GROUP', url: `https://t.me/${botUsername}?startgroup=rooms` },
+      { text: 'MORE INFO', callback_data: 'pa:more_info' }
+    ],
+    [
+      { text: '+ CHANNEL', url: `https://t.me/${botUsername}?startchannel=rooms` },
+      { text: 'Refresh', callback_data: 'pa:refresh' }
+    ],
+    [
+      isDMSubscriber
+        ? { text: 'View List', callback_data: 'pa:view_list' }
+        : { text: '+ Direct Message', callback_data: 'pa:enable_dm' },
+      { text: 'Settings', callback_data: 'pa:settings' }
     ]
-  };
+  ];
+
+  // Add admin row for super admin in DM
+  if (isAdmin && settings && settings.chat_type === 'private') {
+    keyboard.push([
+      { text: '🔧 Admin Panel', callback_data: 'admin:panel' },
+      { text: '👥 Subscriptions', callback_data: 'admin:subscriptions' }
+    ]);
+  }
+
+  return { inline_keyboard: keyboard };
 }
 
 /**
@@ -1579,7 +1588,7 @@ async function postMessage(chatId) {
     const rooms = await getActiveRooms(settings.inactive_threshold_minutes || 60);
     const telegramGroups = await getTelegramGroups();
     const text = buildMessage(rooms, telegramGroups);
-    const keyboard = mainKeyboard(settings);
+    const keyboard = mainKeyboard(settings, settings.configured_by_user_id || chatId);
 
     // Delete old message if exists
     if (settings.last_message_id) {
@@ -1627,7 +1636,7 @@ async function updateMessage(chatId, msgId) {
     const rooms = await getActiveRooms(settings.inactive_threshold_minutes || 60);
     const telegramGroups = await getTelegramGroups();
     const text = buildMessage(rooms, telegramGroups);
-    const keyboard = mainKeyboard(settings);
+    const keyboard = mainKeyboard(settings, settings.configured_by_user_id || chatId);
 
     await bot.editMessageText(text, {
       chat_id: chatId,
