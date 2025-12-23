@@ -699,32 +699,30 @@ ExpireHours is optional (omit for permanent)
         return;
       }
 
-      // Manage Subscriptions
-      if (data === 'admin:subscriptions') {
+      // Manage Subscriptions (with pagination)
+      if (data === 'admin:subscriptions' || data.startsWith('admin:subscriptions:')) {
+        const page = data.includes(':') && data.split(':')[2] ? parseInt(data.split(':')[2]) : 0;
+        const perPage = 8; // 4 rows of 2
         const subs = await getAllSubscriptions();
 
         let text = `
 <b>👥 MANAGE SUBSCRIPTIONS</b>
 ━━━━━━━━━━━━━━━━━━
-
-<b>Active Subscriptions:</b>
 `;
-        const buttons = [];
 
-        // Helper to get chat display name
-        async function getChatDisplayName(chatId, chatType) {
+        // Helper to get short display name
+        async function getShortName(chatId, chatType) {
           try {
             const chat = await bot.getChat(chatId);
             if (chatType === 'private') {
-              const firstName = chat.first_name || '';
-              const lastName = chat.last_name || '';
-              return `DM ${firstName} ${lastName} [${chatId}]`.trim();
+              const name = chat.first_name || 'User';
+              return name.substring(0, 12);
             } else {
-              const title = chat.title || 'Unknown';
-              return `${title} [${chatId}]`;
+              const title = chat.title || 'Chat';
+              return title.substring(0, 12);
             }
           } catch (e) {
-            return chatType === 'private' ? `DM [${chatId}]` : `[${chatId}]`;
+            return chatType === 'private' ? 'DM' : 'Chat';
           }
         }
 
@@ -733,50 +731,49 @@ ExpireHours is optional (omit for permanent)
         const groups = subs.filter(s => s.chat_type === 'group' || s.chat_type === 'supergroup');
         const channels = subs.filter(s => s.chat_type === 'channel');
 
-        if (dms.length > 0) {
-          text += `\n<b>💬 DMs (</b>${dms.length}<b>)</b>\n`;
-          for (const sub of dms.slice(0, 5)) {
-            const status = sub.enabled ? '🟢' : '🔴';
-            const displayName = await getChatDisplayName(sub.chat_id, 'private');
-            text += `  ${status} ${displayName} (${sub.repost_interval_hours}h)\n`;
-            buttons.push([{
-              text: `${status} ${displayName}`,
-              callback_data: `admin:sub_view:${sub.chat_id}`
-            }]);
-          }
-          if (dms.length > 5) text += `  <i>... and ${dms.length - 5} more</i>\n`;
+        text += `<b>💬</b> ${dms.length} DMs  <b>👥</b> ${groups.length} Groups  <b>📢</b> ${channels.length} Channels\n`;
+
+        // Combine all subs for pagination
+        const allSubs = [...dms, ...groups, ...channels];
+        const totalPages = Math.ceil(allSubs.length / perPage);
+        const startIdx = page * perPage;
+        const pageSubs = allSubs.slice(startIdx, startIdx + perPage);
+
+        if (allSubs.length > 0) {
+          text += `\n<b>Page ${page + 1}/${totalPages}</b> (${allSubs.length} total)\n`;
+        } else {
+          text += '\n<i>No subscriptions yet</i>';
         }
 
-        if (groups.length > 0) {
-          text += `\n<b>👥 Groups (</b>${groups.length}<b>)</b>\n`;
-          for (const sub of groups.slice(0, 5)) {
+        const buttons = [];
+
+        // Build buttons 2 per row
+        for (let i = 0; i < pageSubs.length; i += 2) {
+          const row = [];
+          for (let j = 0; j < 2 && (i + j) < pageSubs.length; j++) {
+            const sub = pageSubs[i + j];
             const status = sub.enabled ? '🟢' : '🔴';
-            const displayName = await getChatDisplayName(sub.chat_id, 'group');
-            text += `  ${status} ${displayName} (${sub.repost_interval_hours}h)\n`;
-            buttons.push([{
-              text: `${status} ${displayName.substring(0, 30)}`,
+            const typeIcon = sub.chat_type === 'private' ? '💬' : (sub.chat_type === 'channel' ? '📢' : '👥');
+            const shortName = await getShortName(sub.chat_id, sub.chat_type);
+            row.push({
+              text: `${status}${typeIcon} ${shortName}`,
               callback_data: `admin:sub_view:${sub.chat_id}`
-            }]);
+            });
           }
-          if (groups.length > 5) text += `  <i>... and ${groups.length - 5} more</i>\n`;
+          buttons.push(row);
         }
 
-        if (channels.length > 0) {
-          text += `\n<b>📢 Channels (</b>${channels.length}<b>)</b>\n`;
-          for (const sub of channels.slice(0, 5)) {
-            const status = sub.enabled ? '🟢' : '🔴';
-            const displayName = await getChatDisplayName(sub.chat_id, 'channel');
-            text += `  ${status} ${displayName} (${sub.repost_interval_hours}h)\n`;
-            buttons.push([{
-              text: `${status} ${displayName.substring(0, 30)}`,
-              callback_data: `admin:sub_view:${sub.chat_id}`
-            }]);
+        // Pagination row
+        if (totalPages > 1) {
+          const navRow = [];
+          if (page > 0) {
+            navRow.push({ text: '« Prev', callback_data: `admin:subscriptions:${page - 1}` });
           }
-          if (channels.length > 5) text += `  <i>... and ${channels.length - 5} more</i>\n`;
-        }
-
-        if (subs.length === 0) {
-          text += '<i>No subscriptions yet</i>';
+          navRow.push({ text: `${page + 1}/${totalPages}`, callback_data: 'admin:subscriptions' });
+          if (page < totalPages - 1) {
+            navRow.push({ text: 'Next »', callback_data: `admin:subscriptions:${page + 1}` });
+          }
+          buttons.push(navRow);
         }
 
         buttons.push([{ text: '➕ Enroll New', callback_data: 'admin:enroll' }]);
