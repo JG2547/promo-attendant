@@ -705,6 +705,23 @@ ExpireHours is optional (omit for permanent)
 `;
         const buttons = [];
 
+        // Helper to get chat display name
+        async function getChatDisplayName(chatId, chatType) {
+          try {
+            const chat = await bot.getChat(chatId);
+            if (chatType === 'private') {
+              const firstName = chat.first_name || '';
+              const lastName = chat.last_name || '';
+              return `DM ${firstName} ${lastName} [${chatId}]`.trim();
+            } else {
+              const title = chat.title || 'Unknown';
+              return `${title} [${chatId}]`;
+            }
+          } catch (e) {
+            return chatType === 'private' ? `DM [${chatId}]` : `[${chatId}]`;
+          }
+        }
+
         // Group by type
         const dms = subs.filter(s => s.chat_type === 'private');
         const groups = subs.filter(s => s.chat_type === 'group' || s.chat_type === 'supergroup');
@@ -714,9 +731,10 @@ ExpireHours is optional (omit for permanent)
           text += `\n<b>💬 DMs (</b>${dms.length}<b>)</b>\n`;
           for (const sub of dms.slice(0, 5)) {
             const status = sub.enabled ? '🟢' : '🔴';
-            text += `  ${status} ${sub.chat_id} (${sub.repost_interval_hours}h)\n`;
+            const displayName = await getChatDisplayName(sub.chat_id, 'private');
+            text += `  ${status} ${displayName} (${sub.repost_interval_hours}h)\n`;
             buttons.push([{
-              text: `${status} DM ${sub.chat_id}`,
+              text: `${status} ${displayName}`,
               callback_data: `admin:sub_view:${sub.chat_id}`
             }]);
           }
@@ -727,9 +745,10 @@ ExpireHours is optional (omit for permanent)
           text += `\n<b>👥 Groups (</b>${groups.length}<b>)</b>\n`;
           for (const sub of groups.slice(0, 5)) {
             const status = sub.enabled ? '🟢' : '🔴';
-            text += `  ${status} ${sub.chat_id} (${sub.repost_interval_hours}h)\n`;
+            const displayName = await getChatDisplayName(sub.chat_id, 'group');
+            text += `  ${status} ${displayName} (${sub.repost_interval_hours}h)\n`;
             buttons.push([{
-              text: `${status} Group ${sub.chat_id}`,
+              text: `${status} ${displayName.substring(0, 30)}`,
               callback_data: `admin:sub_view:${sub.chat_id}`
             }]);
           }
@@ -740,9 +759,10 @@ ExpireHours is optional (omit for permanent)
           text += `\n<b>📢 Channels (</b>${channels.length}<b>)</b>\n`;
           for (const sub of channels.slice(0, 5)) {
             const status = sub.enabled ? '🟢' : '🔴';
-            text += `  ${status} ${sub.chat_id} (${sub.repost_interval_hours}h)\n`;
+            const displayName = await getChatDisplayName(sub.chat_id, 'channel');
+            text += `  ${status} ${displayName} (${sub.repost_interval_hours}h)\n`;
             buttons.push([{
-              text: `${status} Channel ${sub.chat_id}`,
+              text: `${status} ${displayName.substring(0, 30)}`,
               callback_data: `admin:sub_view:${sub.chat_id}`
             }]);
           }
