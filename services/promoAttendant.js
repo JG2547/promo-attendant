@@ -51,11 +51,17 @@ async function initPromoAttendant() {
       const userId = msg.from?.id || msg.sender_chat?.id || chatId;
       const text = msg.text || '';
 
-      // /settings and /menu command for super admin only (DM only)
-      if ((text === '/settings' || text === '/menu') && msg.chat.type === 'private') {
+      // /settings command for super admin only (DM only)
+      if (text === '/settings' && msg.chat.type === 'private') {
         if (isSuperAdmin(userId)) {
           await showAdminPanel(chatId);
         }
+        return;
+      }
+
+      // /menu command - show room list with keyboard buttons (DM only)
+      if (text === '/menu' && msg.chat.type === 'private') {
+        await postMessage(chatId);
         return;
       }
 
