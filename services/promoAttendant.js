@@ -116,6 +116,36 @@ async function initPromoAttendant() {
         return;
       }
 
+      // /enroll command for super admin (enroll a chat by ID)
+      if (text.startsWith('/enroll ') && msg.chat.type === 'private' && isSuperAdmin(userId)) {
+        const parts = text.replace('/enroll ', '').split('|').map(s => s.trim());
+        const [enrollChatId, chatType] = parts;
+
+        if (!enrollChatId) {
+          await bot.sendMessage(chatId, '❌ Invalid format. Use: /enroll ChatID|Type');
+          return;
+        }
+
+        const validTypes = ['private', 'group', 'supergroup', 'channel'];
+        const type = validTypes.includes(chatType) ? chatType : 'unknown';
+
+        try {
+          await enableChat(parseInt(enrollChatId), userId, type);
+          await bot.sendMessage(chatId, `✅ Enrolled chat <code>${enrollChatId}</code> as ${type}`, { parse_mode: 'HTML' });
+
+          // Try to post to the chat
+          try {
+            await postMessage(parseInt(enrollChatId));
+            await bot.sendMessage(chatId, '📤 First message sent successfully!');
+          } catch (postErr) {
+            await bot.sendMessage(chatId, `⚠️ Enrolled but couldn't post: ${postErr.message}`);
+          }
+        } catch (err) {
+          await bot.sendMessage(chatId, `❌ Error: ${err.message}`);
+        }
+        return;
+      }
+
       // Handle /start command
       if (text === '/start' || text.startsWith('/start ') || text === '/start@' + (process.env.PROMO_ATTENDANT_BOT_USERNAME || 'PromoAttendantBot')) {
         const payload = text.split(' ')[1];
@@ -317,6 +347,20 @@ function setupCallbacks() {
         return;
       }
 
+      // View List (for DM subscribers)
+      if (data === 'pa:view_list') {
+        const viewListText = buildViewListMessage();
+        await bot.editMessageText(viewListText, {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+          reply_markup: viewListKeyboard()
+        });
+        await bot.answerCallbackQuery(callbackQuery.id);
+        return;
+      }
+
       // More Info
       if (data === 'pa:more_info') {
         const moreInfoText = buildMoreInfoMessage();
@@ -357,6 +401,7 @@ Select an option below:
             inline_keyboard: [
               [{ text: '📹 Manage Zoom Rooms', callback_data: 'admin:zoom' }],
               [{ text: '💬 Manage Telegram Chats', callback_data: 'admin:telegram' }],
+              [{ text: '👥 Manage Subscriptions', callback_data: 'admin:subscriptions' }],
               [{ text: '➕ Add Manual Entry', callback_data: 'admin:add' }],
               [{ text: '👁 View Hidden Items', callback_data: 'admin:hidden' }],
               [{ text: '🔄 Refresh Stats', callback_data: 'admin:refresh' }],
@@ -648,6 +693,217 @@ ExpireHours is optional (omit for permanent)
         return;
       }
 
+      // Manage Subscriptions
+      if (data === 'admin:subscriptions') {
+        const subs = await getAllSubscriptions();
+
+        let text = `
+<b>👥 MANAGE SUBSCRIPTIONS</b>
+━━━━━━━━━━━━━━━━━━
+
+<b>Active Subscriptions:</b>
+`;
+        const buttons = [];
+
+        // Group by type
+        const dms = subs.filter(s => s.chat_type === 'private');
+        const groups = subs.filter(s => s.chat_type === 'group' || s.chat_type === 'supergroup');
+        const channels = subs.filter(s => s.chat_type === 'channel');
+
+        if (dms.length > 0) {
+          text += `\n<b>💬 DMs (</b>${dms.length}<b>)</b>\n`;
+          for (const sub of dms.slice(0, 5)) {
+            const status = sub.enabled ? '🟢' : '🔴';
+            text += `  ${status} ${sub.chat_id} (${sub.repost_interval_hours}h)\n`;
+            buttons.push([{
+              text: `${status} DM ${sub.chat_id}`,
+              callback_data: `admin:sub_view:${sub.chat_id}`
+            }]);
+          }
+          if (dms.length > 5) text += `  <i>... and ${dms.length - 5} more</i>\n`;
+        }
+
+        if (groups.length > 0) {
+          text += `\n<b>👥 Groups (</b>${groups.length}<b>)</b>\n`;
+          for (const sub of groups.slice(0, 5)) {
+            const status = sub.enabled ? '🟢' : '🔴';
+            text += `  ${status} ${sub.chat_id} (${sub.repost_interval_hours}h)\n`;
+            buttons.push([{
+              text: `${status} Group ${sub.chat_id}`,
+              callback_data: `admin:sub_view:${sub.chat_id}`
+            }]);
+          }
+          if (groups.length > 5) text += `  <i>... and ${groups.length - 5} more</i>\n`;
+        }
+
+        if (channels.length > 0) {
+          text += `\n<b>📢 Channels (</b>${channels.length}<b>)</b>\n`;
+          for (const sub of channels.slice(0, 5)) {
+            const status = sub.enabled ? '🟢' : '🔴';
+            text += `  ${status} ${sub.chat_id} (${sub.repost_interval_hours}h)\n`;
+            buttons.push([{
+              text: `${status} Channel ${sub.chat_id}`,
+              callback_data: `admin:sub_view:${sub.chat_id}`
+            }]);
+          }
+          if (channels.length > 5) text += `  <i>... and ${channels.length - 5} more</i>\n`;
+        }
+
+        if (subs.length === 0) {
+          text += '<i>No subscriptions yet</i>';
+        }
+
+        buttons.push([{ text: '➕ Enroll New', callback_data: 'admin:enroll' }]);
+        buttons.push([{ text: '« Back', callback_data: 'admin:panel' }]);
+
+        await bot.editMessageText(text.trim(), {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: buttons }
+        });
+        await bot.answerCallbackQuery(callbackQuery.id);
+        return;
+      }
+
+      // Enroll new subscription
+      if (data === 'admin:enroll') {
+        const text = `
+<b>➕ ENROLL NEW SUBSCRIPTION</b>
+━━━━━━━━━━━━━━━━━━
+
+Send a message with the chat ID to enroll:
+
+<code>/enroll ChatID|Type</code>
+
+<b>Types:</b> private, group, channel
+
+<b>Examples:</b>
+<code>/enroll 123456789|private</code>
+<code>/enroll -1001234567890|group</code>
+<code>/enroll -1001234567890|channel</code>
+
+The bot will start posting to this chat.
+        `.trim();
+
+        await bot.editMessageText(text, {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[{ text: '« Back', callback_data: 'admin:subscriptions' }]]
+          }
+        });
+        await bot.answerCallbackQuery(callbackQuery.id);
+        return;
+      }
+
+      // View/Edit subscription
+      if (data.startsWith('admin:sub_view:')) {
+        const subChatId = data.replace('admin:sub_view:', '');
+        const sub = await getSettings(parseInt(subChatId));
+
+        const status = sub.enabled ? '🟢 Enabled' : '🔴 Disabled';
+        const interval = sub.repost_interval_hours || 4;
+        const chatType = sub.chat_type || 'unknown';
+
+        const text = `
+<b>📋 SUBSCRIPTION DETAILS</b>
+━━━━━━━━━━━━━━━━━━
+
+<b>Chat ID:</b> <code>${subChatId}</code>
+<b>Type:</b> ${chatType}
+<b>Status:</b> ${status}
+<b>Interval:</b> ${interval}h
+
+Select an action:
+        `.trim();
+
+        const intervalBtns = [1, 2, 4, 8, 12, 24].map(h => ({
+          text: h === interval ? `[${h}h]` : `${h}h`,
+          callback_data: `admin:sub_int:${subChatId}:${h}`
+        }));
+
+        await bot.editMessageText(text, {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: sub.enabled ? '🔴 Disable' : '🟢 Enable', callback_data: `admin:sub_toggle:${subChatId}` }],
+              intervalBtns.slice(0, 3),
+              intervalBtns.slice(3, 6),
+              [{ text: '📤 Force Post Now', callback_data: `admin:sub_post:${subChatId}` }],
+              [{ text: '🗑 Unenroll', callback_data: `admin:sub_del:${subChatId}` }],
+              [{ text: '« Back', callback_data: 'admin:subscriptions' }]
+            ]
+          }
+        });
+        await bot.answerCallbackQuery(callbackQuery.id);
+        return;
+      }
+
+      // Toggle subscription
+      if (data.startsWith('admin:sub_toggle:')) {
+        const subChatId = parseInt(data.replace('admin:sub_toggle:', ''));
+        const sub = await getSettings(subChatId);
+        const newEnabled = !sub.enabled;
+        await updateSettings(subChatId, { enabled: newEnabled });
+
+        if (newEnabled) {
+          startTimer(subChatId);
+        } else {
+          stopTimer(subChatId);
+          stopUpdateTimer(subChatId);
+        }
+
+        await bot.answerCallbackQuery(callbackQuery.id, {
+          text: newEnabled ? 'Subscription enabled' : 'Subscription disabled'
+        });
+        bot.emit('callback_query', { ...callbackQuery, data: `admin:sub_view:${subChatId}` });
+        return;
+      }
+
+      // Change subscription interval
+      if (data.startsWith('admin:sub_int:')) {
+        const parts = data.replace('admin:sub_int:', '').split(':');
+        const subChatId = parseInt(parts[0]);
+        const hours = parseInt(parts[1]);
+
+        await updateSettings(subChatId, { repost_interval_hours: hours });
+        const sub = await getSettings(subChatId);
+        if (sub.enabled) {
+          startTimer(subChatId);
+        }
+
+        await bot.answerCallbackQuery(callbackQuery.id, { text: `Interval set to ${hours}h` });
+        bot.emit('callback_query', { ...callbackQuery, data: `admin:sub_view:${subChatId}` });
+        return;
+      }
+
+      // Force post to subscription
+      if (data.startsWith('admin:sub_post:')) {
+        const subChatId = parseInt(data.replace('admin:sub_post:', ''));
+        try {
+          await postMessage(subChatId);
+          await bot.answerCallbackQuery(callbackQuery.id, { text: 'Message posted!' });
+        } catch (e) {
+          await bot.answerCallbackQuery(callbackQuery.id, { text: 'Failed: ' + e.message, show_alert: true });
+        }
+        return;
+      }
+
+      // Delete/Unenroll subscription
+      if (data.startsWith('admin:sub_del:')) {
+        const subChatId = parseInt(data.replace('admin:sub_del:', ''));
+        stopTimer(subChatId);
+        stopUpdateTimer(subChatId);
+        await query('DELETE FROM promo_attendant_settings WHERE chat_id = $1', [subChatId]);
+        await bot.answerCallbackQuery(callbackQuery.id, { text: 'Subscription removed' });
+        bot.emit('callback_query', { ...callbackQuery, data: 'admin:subscriptions' });
+        return;
+      }
+
       await bot.answerCallbackQuery(callbackQuery.id);
     } catch (error) {
       console.error('[PromoAttendant] Callback error:', error.message);
@@ -879,6 +1135,16 @@ async function getSettings(chatId) {
 }
 
 /**
+ * Get all subscriptions
+ */
+async function getAllSubscriptions() {
+  const result = await query(
+    `SELECT * FROM promo_attendant_settings ORDER BY chat_type, enabled DESC, updated_at DESC`
+  );
+  return result.rows;
+}
+
+/**
  * Update settings for a chat
  */
 async function updateSettings(chatId, updates) {
@@ -1076,7 +1342,8 @@ function buildMessage(rooms, telegramGroups = []) {
 /**
  * Build main keyboard
  */
-function mainKeyboard() {
+function mainKeyboard(settings = null) {
+  const isDMSubscriber = settings && settings.chat_type === 'private' && settings.enabled;
   const botUsername = process.env.PROMO_ATTENDANT_BOT_USERNAME || 'PromoAttendantBot';
 
   return {
@@ -1090,7 +1357,9 @@ function mainKeyboard() {
         { text: 'Refresh', callback_data: 'pa:refresh' }
       ],
       [
-        { text: '+ Direct Message', callback_data: 'pa:enable_dm' },
+        isDMSubscriber
+          ? { text: 'View List', callback_data: 'pa:view_list' }
+          : { text: '+ Direct Message', callback_data: 'pa:enable_dm' },
         { text: 'Settings', callback_data: 'pa:settings' }
       ]
     ]
@@ -1263,6 +1532,43 @@ function moreInfoKeyboard() {
 }
 
 /**
+ * Build View List message (for DM subscribers)
+ */
+function buildViewListMessage() {
+  return `
+<b>PNP Directory List</b>
+
+View and subscribe to active PNP rooms and groups.
+
+<b>━━━━━━━━━━━━━━━━━━━━━━━━</b>
+
+<b>What is this?</b>
+The PNP Directory List Bot maintains a real-time
+directory of active PNP rooms and groups.
+
+<b>Features:</b>
+• Browse active Zoom rooms
+• Find Telegram video chat groups
+• Subscribe to room notifications
+• Add your own room to the directory
+
+<b>━━━━━━━━━━━━━━━━━━━━━━━━</b>
+  `.trim();
+}
+
+/**
+ * Build View List keyboard
+ */
+function viewListKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: 'Open PNP Directory List', url: 'https://t.me/PNPDirectoryListBot' }],
+      [{ text: '« Back', callback_data: 'pa:back' }]
+    ]
+  };
+}
+
+/**
  * Post a new message to a chat
  */
 async function postMessage(chatId) {
@@ -1273,7 +1579,7 @@ async function postMessage(chatId) {
     const rooms = await getActiveRooms(settings.inactive_threshold_minutes || 60);
     const telegramGroups = await getTelegramGroups();
     const text = buildMessage(rooms, telegramGroups);
-    const keyboard = mainKeyboard();
+    const keyboard = mainKeyboard(settings);
 
     // Delete old message if exists
     if (settings.last_message_id) {
@@ -1321,7 +1627,7 @@ async function updateMessage(chatId, msgId) {
     const rooms = await getActiveRooms(settings.inactive_threshold_minutes || 60);
     const telegramGroups = await getTelegramGroups();
     const text = buildMessage(rooms, telegramGroups);
-    const keyboard = mainKeyboard();
+    const keyboard = mainKeyboard(settings);
 
     await bot.editMessageText(text, {
       chat_id: chatId,
