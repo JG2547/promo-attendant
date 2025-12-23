@@ -51,8 +51,8 @@ async function initPromoAttendant() {
       const userId = msg.from?.id || msg.sender_chat?.id || chatId;
       const text = msg.text || '';
 
-      // Hidden /settings command for super admin only (DM only)
-      if (text === '/settings' && msg.chat.type === 'private') {
+      // /settings and /menu command for super admin only (DM only)
+      if ((text === '/settings' || text === '/menu') && msg.chat.type === 'private') {
         if (isSuperAdmin(userId)) {
           await showAdminPanel(chatId);
         }
@@ -1280,10 +1280,10 @@ function buildMessage(rooms, telegramGroups = []) {
   const lines = [];
 
   // Header (50 chars)
-  lines.push('<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>');
-  lines.push('<code>◇               ⊱PROMO ATTENDANT⊰                ◇</code>');
-  lines.push('<code>◇                 ⊱ Room Pulse ⊰                 ◇</code>');
-  lines.push('<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>');
+  lines.push('<code>━━━━━━━━━━━━━━━━━━━━━━━━━</code>');
+  lines.push('<code>◇    ⊱PROMO ATTENDANT⊰    ◇</code>');
+  lines.push('<code>◇      ⊱ Room Pulse ⊰      ◇</code>');
+  lines.push('<code>━━━━━━━━━━━━━━━━━━━━━━━━━</code>');
   lines.push('');
 
   // Zoom Rooms section
@@ -1334,7 +1334,7 @@ function buildMessage(rooms, telegramGroups = []) {
   }
 
   // Footer
-  lines.push('<code>━━━━━━━━━━━━━━━━━━⊱ Let\'s Cloud ⊰━━━━━━━━━━━━━━━━━</code>');
+  lines.push('<code>━━━━━━━⊱ Let\'s Cloud ⊰━━━━━━━</code>');
 
   return lines.join('\n');
 }
